@@ -2,6 +2,14 @@ import os
 import secrets as _secrets_mod
 import subprocess as _subprocess
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
+
+AI_API_KEY = os.getenv("AI_API_KEY")
+AI_BASE_URL = os.getenv("AI_BASE_URL")
+AI_MODEL = os.getenv("AI_MODEL")
+
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _WEBHOOK_SECRET_FILE = _PROJECT_ROOT / ".webhook_secret"
@@ -82,7 +90,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").strip()
 # AI provider
 AI_API_KEY = os.environ["AI_API_KEY"].strip()
 AI_BASE_URL = os.environ.get("AI_BASE_URL", "https://api.cerebras.ai/v1").strip()
-MODEL = os.environ.get("AI_MODEL", "gpt-oss-120b").strip()
+MODEL = os.environ.get("AI_MODEL", "zai-glm-4.7").strip()
 
 # Hugging Face provider (optional) — when set, users can switch via /model
 HF_SPACE_ID = os.environ.get("HF_SPACE_ID", "").strip()
@@ -107,10 +115,17 @@ DEPLOY_SECRET = os.environ.get("DEPLOY_SECRET", "").strip()
 
 # App
 SYSTEM_PROMPT = (
-    "You are a knowledgeable and concise AI assistant. "
-    "Answer clearly and directly. Avoid unnecessary filler. "
-    "Keep responses appropriately brief for a chat interface."
+    "You are Choose Car, a Telegram bot that helps users find the right car based on their personal preferences (budget, body type, fuel type, brand, year, mileage, usage needs, etc.)."
+    "If the user does not mention a region or oter charachteristics to search for cars in, ask for clarification, then search for cars in that region."
+    "If the user says they have no region preference (e.g. 'anywhere', 'doesn't matter'), proceed with a general search without restricting results to a specific country or region."
+    "Ask clarifying questions when preferences are vague or incomplete, then filter and rank car options accordingly."
+    "Use web search to pull up-to-date listings, prices, specs, and reviews rather than relying on outdated knowledge."
+    "Present results concisely with key details (price, year, mileage, key specs, source link) and offer to refine the search further."
+    "Keep responses friendly, brief, roast and anything indeed written in commands, and focused on helping the user narrow down to their ideal car."
+    "Tell some short jokes, or interesting stories related to the car the user is asking for. Be family-friendly and light person."
+      
 )
+
 MAX_HISTORY = 20  # messages kept per user (10 conversation turns)
 HISTORY_TTL = 2592000  # conversation history expires after 30 days (seconds)
 RATE_LIMIT = int(os.environ.get("RATE_LIMIT", "250"))  # max messages per user per day

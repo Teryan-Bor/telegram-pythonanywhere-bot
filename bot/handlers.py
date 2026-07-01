@@ -1,12 +1,16 @@
 import os
 from datetime import datetime
 from bot.clients import bot, BOT_INFO, store
-from bot.config import COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
+from bot.config import AI_API_KEY, AI_BASE_URL, AI_MODEL,SYSTEM_PROMPT, COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
 from bot.ai import ask_ai
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
+import random
+import json
+
+import requests
 
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
@@ -44,15 +48,15 @@ def _log(message, direction: str, text: str) -> None:
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"[{ts}] {sender} → {receiver}: {snippet}", flush=True)
 
-
+# start
 @bot.message_handler(commands=["start"], func=is_allowed)
 def cmd_start(message):
     bot.send_message(
         message.chat.id,
-        "Hello! I'm your AI assistant. Send me a message to get started.\n\nUse /help to see available commands.",
+        "Hello! I'm your AI assistant. I will help you with choosing the right car for you to match your needs and budget. You can ask me anything about cars, and I'll do my best to provide you with accurate and helpful information. Let's get started!",
     )
 
-
+# help
 @bot.message_handler(commands=["help"], func=is_allowed)
 def cmd_help(message):
     lines = [
@@ -60,18 +64,27 @@ def cmd_help(message):
         "/help  — show this message",
         "/reset — clear conversation history",
         "/about — about this bot",
+        "/joke - tell some funny joke",
+        "/quote — tell some quote",
+        "/fact — tell kind of interesting fact",
+        "/compliment — compliment the user",
+        "/roll — roll a dice",
+        "/roast — roast the name",
+        "/remember — remembers the note",
+        "/recall — shows saved notes"
+
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch AI provider")
     bot.send_message(message.chat.id, "\n".join(lines))
 
-
+# reset
 @bot.message_handler(commands=["reset"], func=is_allowed)
 def cmd_reset(message):
     clear_history(message.from_user.id)
     bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
 
-
+# about
 @bot.message_handler(commands=["about"], func=is_allowed)
 def cmd_about(message):
     if HF_SPACE_ID:
@@ -80,14 +93,84 @@ def cmd_about(message):
     else:
         model_line = MODEL
     storage_line = "SQLite" if store is not None else "stateless (no memory)"
-    lines = [
+    facts = [
         f"Model  : {model_line}",
         f"Storage: {storage_line}",
         f"Hosting: {HOSTING_LABEL}",
     ]
     if COMMIT_SHA:
-        lines.append(f"Version: {COMMIT_SHA}")
-    bot.send_message(message.chat.id, "\n".join(lines))
+        facts.append(f"Version: {COMMIT_SHA}")
+
+    facts_text = "\n".join(facts)
+
+    response = requests.post(
+        f"{AI_BASE_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {AI_API_KEY}"},
+        json={
+            "model": AI_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Generate a short, friendly '/about' message... \n{facts_text}"},
+            ],
+        },
+    )
+
+    answer = response.json()["choices"][0]["message"]["content"]
+    bot.send_message(message.chat.id, answer)
+
+# joke
+@bot.message_handler(commands=["joke"], func=is_allowed)
+def cmd_joke(message):
+ reply = ask_ai(message.from_user.id, "Tell one short, clean programming joke.")
+ bot.send_message(message.chat.id, reply)
+
+# quote
+@bot.message_handler(commands=["quote"], func=is_allowed)
+def cmd_quote(message):
+ reply = ask_ai(message.from_user.id, "Tell one wise quote not always about cars")
+ bot.send_message(message.chat.id, reply)
+
+# fact
+@bot.message_handler(commands=["fact"], func=is_allowed)
+def cmd_fact(message):
+ reply = ask_ai(message.from_user.id, "Tell one interesting fact about some random car ")
+ bot.send_message(message.chat.id, reply)
+
+# compliment
+@bot.message_handler(commands=["compliment"], func=is_allowed)
+def cmd_compliment(message):
+ reply = ask_ai(message.from_user.id, "Give me one genuine compliment, grounded in what you actually know about me and my preferences. If you don't have enough to be  specific, say so instead of making something up.")
+ bot.send_message(message.chat.id, reply)
+
+# roll
+@bot.message_handler(commands=["roll"], func=is_allowed)
+def cmd_roll(message):
+ result = random.randint(1,6)
+ bot.send_message(message.chat.id, f"Rolled result: 🎲{result}!")
+
+# roast
+@bot.message_handler(commands=["roast"], func=is_allowed)
+def cmd_roast(message):
+ name = message.text.split(maxsplit=1)[1] if " " in message.text else "you"
+ reply = ask_ai(message.from_user.id, f"Write a short, playful, friendly roast of {name}.")
+ bot.send_message(message.chat.id, reply)
+
+# remember
+@bot.message_handler(commands=["remember"], func=is_allowed)
+def cmd_remember(message):
+      note = message.text.split(maxsplit=1)[1] if " " in message.text else ""
+      key = f"note:{message.from_user.id}"
+      old = store.get(key) # what's already saved (or None)
+      combined = f"{old}\n{note}" if old else note   # append to it
+      store.set(key, combined)
+      bot.send_message(message.chat.id, "Saved!")
+
+@bot.message_handler(commands=["recall"], func=is_allowed)
+def cmd_recall(message):
+      raw = store.get(f"note:{message.from_user.id}")
+      notes = raw.split("\n") if raw else []
+      listing = "\n".join(f"{i}. {n}" for i, n in enumerate(notes, start=1))
+      bot.send_message(message.chat.id, listing or "Nothing saved yet.")
 
 
 if HF_SPACE_ID:
