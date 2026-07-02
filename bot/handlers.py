@@ -71,8 +71,8 @@ def cmd_help(message):
         "/roll — roll a dice",
         "/roast — roast the name",
         "/remember — remembers the note",
-        "/recall — shows saved notes"
-
+        "/recall — shows saved notes",
+        "/forget — delete all notes"
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch AI provider")
@@ -171,6 +171,14 @@ def cmd_recall(message):
       notes = raw.split("\n") if raw else []
       listing = "\n".join(f"{i}. {n}" for i, n in enumerate(notes, start=1))
       bot.send_message(message.chat.id, listing or "Nothing saved yet.")
+
+@bot.message_handler(commands=["forget"], func=is_allowed)
+def cmd_forget(message):
+      raw = store.get(f"note:{message.from_user.id}")
+      key = f"note:{message.from_user.id}"
+      raw = ""
+      store.set(key, raw)
+      bot.send_message(message.chat.id, "All notes were deleted")
 
 
 if HF_SPACE_ID:
