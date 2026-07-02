@@ -72,7 +72,8 @@ def cmd_help(message):
         "/roast — roast the name",
         "/remember — remembers the note",
         "/recall — shows saved notes",
-        "/forget — delete all notes"
+        "/forget — delete all notes",
+        "/compare — compares two or more models with each other"
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch AI provider")
@@ -179,6 +180,13 @@ def cmd_forget(message):
       raw = ""
       store.set(key, raw)
       bot.send_message(message.chat.id, "All notes were deleted")
+
+
+@bot.message_handler(commands=["compare"], func=is_allowed)
+def cmd_compare(message):
+    compare_text = message.text.split(maxsplit=1)[1] if " " in message.text else ""
+    reply = ask_ai(message.from_user.id, f"Compare this car models between each other. Write main characteristics like price, hp, torque, engine and etc: {compare_text}.")
+    bot.send_message(message.from_user.id, reply)
 
 
 if HF_SPACE_ID:
