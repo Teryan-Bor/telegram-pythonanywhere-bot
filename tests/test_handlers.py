@@ -182,6 +182,31 @@ def test_cmd_about_without_store():
         assert "stateless" in sent
 
 
+# ── /sha ─────────────────────────────────────────────────────────────────────
+
+
+def test_cmd_sha_reports_live_commit_sha():
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.COMMIT_SHA", "abc1234"),
+    ):
+        from bot.handlers import cmd_sha
+
+        cmd_sha(make_message())
+        mock_bot.send_message.assert_called_once_with(456, "Live SHA: abc1234")
+
+
+def test_cmd_sha_reports_unknown_when_git_sha_unavailable():
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.COMMIT_SHA", ""),
+    ):
+        from bot.handlers import cmd_sha
+
+        cmd_sha(make_message())
+        mock_bot.send_message.assert_called_once_with(456, "Live SHA: unknown")
+
+
 # ── /model command ────────────────────────────────────────────────────────────
 
 
