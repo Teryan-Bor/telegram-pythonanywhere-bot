@@ -98,21 +98,32 @@ def cmd_reset(message):
 @bot.message_handler(commands=["clear"], func=is_allowed)
 def cmd_clear(message):
     chat_id = message.chat.id
+    
+    # 1. Default number of messages to scan/delete if the user just types /clear
+    scan_limit = 10 
+    
+    # 2. Check if the user provided a specific number (e.g., "/clear 5")
+    command_parts = message.text.split()
+    if len(command_parts) > 1:
+        try:
+            # Convert the text after "/clear" into an integer number
+            scan_limit = int(command_parts[1])
+        except ValueError:
+            # If they typed letters instead of a number, send an error and stop
+            bot.reply_to(message, "Please provide a valid number. Example: /clear 5")
+            return
+
     deleted = 0
-    # Only sweep history in private chats. In a group the bot may be an admin,
-    # and blindly deleting a range of ids would wipe *other* people's messages,
-    # so there we just remove the /clear command itself and reset memory.
+    
     if message.chat.type == "private":
         misses = 0
-        for mid in range(
-            message.message_id, max(message.message_id - CLEAR_MAX_SCAN, 0), -1
-        ):
+        # 3. Use the user's scan_limit instead of a fixed constant
+        for mid in range(message.message_id, max(message.message_id - scan_limit, 0), -1):
             try:
                 bot.delete_message(chat_id, mid)
                 deleted += 1
                 misses = 0
             except Exception:
-                # >48h old, already deleted, or an id that never existed.
                 misses += 1
                 if misses >= CLEAR_STOP_AFTER_MISSES:
                     break
@@ -122,11 +133,9 @@ def cmd_clear(message):
             deleted = 1
         except Exception:
             pass
-    clear_history(message.from_user.id)  # also forget the conversation
-    # This confirmation is a brand-new message, so it survives the sweep above.
+            
+    clear_history(message.from_user.id)  
     bot.send_message(chat_id, f"Cleared {deleted} message(s) and reset my memory.")
-
-
 # about
 @bot.message_handler(commands=["about"], func=is_allowed)
 def cmd_about(message):
