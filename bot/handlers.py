@@ -4,7 +4,7 @@ from bot.clients import bot, BOT_INFO, store
 from bot.config import AI_API_KEY, AI_BASE_URL, AI_MODEL,SYSTEM_PROMPT, COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
 from bot.ai import ask_ai
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
-from bot.history import clear_history
+from bot.history import clear_history, save_history
 from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
 import random
@@ -63,6 +63,7 @@ def cmd_help(message):
         "/start — welcome message",
         "/help  — show this message",
         "/reset — clear conversation history",
+        "/clear — clear the messages",
         "/about — about this bot",
         "/sha   — show the live git commit SHA",
         "/joke - tell some funny joke",
@@ -85,6 +86,13 @@ def cmd_help(message):
 def cmd_reset(message):
     clear_history(message.from_user.id)
     bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
+
+# clear
+@bot.message_handler(commands=["clear"], func=is_allowed)
+def cmd_clear(message):
+    save_history(message.from_user.id)
+    bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
+
 
 # about
 @bot.message_handler(commands=["about"], func=is_allowed)
