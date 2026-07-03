@@ -4,7 +4,7 @@ from bot.clients import bot, BOT_INFO, store
 from bot.config import AI_API_KEY, AI_BASE_URL, AI_MODEL,SYSTEM_PROMPT, COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
 from bot.ai import ask_ai
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
-from bot.history import clear_history, save_history
+from bot.history import clear_history
 from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
 import random
@@ -22,6 +22,13 @@ VERBOSE_LOG = os.environ.get("BOT_VERBOSE_LOG", "").strip().lower() in (
     "yes",
     "on",
 )
+
+# /clear sweeps backwards from its own message id, deleting each message it
+# still can. Telegram only lets a bot delete messages younger than 48h, so
+# CLEAR_MAX_SCAN bounds how many ids we probe, and we stop early once we've
+# seen CLEAR_STOP_AFTER_MISSES failures in a row (we've hit the 48h boundary).
+CLEAR_MAX_SCAN = 100
+CLEAR_STOP_AFTER_MISSES = 20
 
 
 def _log(message, direction: str, text: str) -> None:
@@ -87,11 +94,37 @@ def cmd_reset(message):
     clear_history(message.from_user.id)
     bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
 
-# clear
+# clear — delete recent messages from the chat, then wipe the AI's memory.
 @bot.message_handler(commands=["clear"], func=is_allowed)
 def cmd_clear(message):
-    save_history(message.from_user.id)
-    bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
+    chat_id = message.chat.id
+    deleted = 0
+    # Only sweep history in private chats. In a group the bot may be an admin,
+    # and blindly deleting a range of ids would wipe *other* people's messages,
+    # so there we just remove the /clear command itself and reset memory.
+    if message.chat.type == "private":
+        misses = 0
+        for mid in range(
+            message.message_id, max(message.message_id - CLEAR_MAX_SCAN, 0), -1
+        ):
+            try:
+                bot.delete_message(chat_id, mid)
+                deleted += 1
+                misses = 0
+            except Exception:
+                # >48h old, already deleted, or an id that never existed.
+                misses += 1
+                if misses >= CLEAR_STOP_AFTER_MISSES:
+                    break
+    else:
+        try:
+            bot.delete_message(chat_id, message.message_id)
+            deleted = 1
+        except Exception:
+            pass
+    clear_history(message.from_user.id)  # also forget the conversation
+    # This confirmation is a brand-new message, so it survives the sweep above.
+    bot.send_message(chat_id, f"Cleared {deleted} message(s) and reset my memory.")
 
 
 # about
