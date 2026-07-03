@@ -64,6 +64,7 @@ def cmd_help(message):
         "/help  — show this message",
         "/reset — clear conversation history",
         "/about — about this bot",
+        "/sha   — show the live git commit SHA",
         "/joke - tell some funny joke",
         "/quote — tell some quote",
         "/fact — tell kind of interesting fact",
@@ -187,6 +188,12 @@ def cmd_compare(message):
     compare_text = message.text.split(maxsplit=1)[1] if " " in message.text else ""
     reply = ask_ai(message.from_user.id, f"Compare this car models between each other. Write main characteristics like price, hp, torque, engine and etc: {compare_text}.")
     bot.send_message(message.from_user.id, reply)
+
+
+@bot.message_handler(commands=["sha"], func=is_allowed)
+def cmd_sha(message):
+    sha = COMMIT_SHA or "unknown"
+    bot.send_message(message.chat.id, f"Live SHA: {sha}")
 
 
 if HF_SPACE_ID:
