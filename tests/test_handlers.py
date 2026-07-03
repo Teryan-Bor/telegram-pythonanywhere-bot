@@ -326,3 +326,85 @@ def test_handle_message_uses_keep_typing():
         msg = make_message()
         handle_message(msg)
         mock_keep.assert_called_once_with(456)
+
+
+# ── _command_arg helper ────────────────────────────────────────────────────────
+
+
+def test_command_arg_extracts_text():
+    from bot.handlers import _command_arg
+
+    assert _command_arg(make_message(text="/spec Toyota Corolla")) == "Toyota Corolla"
+
+
+def test_command_arg_empty_when_no_arg():
+    from bot.handlers import _command_arg
+
+    assert _command_arg(make_message(text="/spec")) == ""
+
+
+def test_command_arg_trailing_space_no_crash():
+    """Regression: the old `[1] if ' ' in text` idiom raised IndexError on '/spec '."""
+    from bot.handlers import _command_arg
+
+    assert _command_arg(make_message(text="/spec ")) == ""
+
+
+# ── new car commands ───────────────────────────────────────────────────────────
+
+
+def test_cmd_spec_usage_hint_without_arg():
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.ask_ai") as mock_ask,
+    ):
+        from bot.handlers import cmd_spec
+
+        cmd_spec(make_message(text="/spec"))
+        mock_ask.assert_not_called()
+        assert "Usage" in mock_bot.send_message.call_args[0][1]
+
+
+def test_cmd_spec_calls_ask_ai_with_car():
+    with (
+        patch("bot.handlers.bot"),
+        patch("bot.handlers.ask_ai", return_value="specs") as mock_ask,
+        patch("bot.handlers.send_reply") as mock_send,
+        patch("bot.handlers.keep_typing"),
+    ):
+        from bot.handlers import cmd_spec
+
+        msg = make_message(text="/spec Mazda 3")
+        cmd_spec(msg)
+        mock_ask.assert_called_once()
+        assert "Mazda 3" in mock_ask.call_args[0][1]
+        mock_send.assert_called_once_with(msg, "specs")
+
+
+# ── note commands: stateless-mode safety + delete ──────────────────────────────
+
+
+def test_cmd_remember_stateless_guard():
+    """With no store, /remember must not crash — it should say memory is off."""
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.store", None),
+    ):
+        from bot.handlers import cmd_remember
+
+        cmd_remember(make_message(text="/remember I like SUVs"))
+        assert "isn't enabled" in mock_bot.send_message.call_args[0][1]
+
+
+def test_cmd_forget_uses_store_delete():
+    """/forget should delete the note key, not overwrite it with an empty string."""
+    fake_store = MagicMock()
+    with (
+        patch("bot.handlers.bot") as mock_bot,
+        patch("bot.handlers.store", fake_store),
+    ):
+        from bot.handlers import cmd_forget
+
+        cmd_forget(make_message(text="/forget", user_id=123))
+        fake_store.delete.assert_called_once_with("note:123")
+        assert "deleted" in mock_bot.send_message.call_args[0][1].lower()

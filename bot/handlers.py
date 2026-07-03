@@ -1,16 +1,13 @@
 import os
 from datetime import datetime
+
 from bot.clients import bot, BOT_INFO, store
-from bot.config import AI_API_KEY, AI_BASE_URL, AI_MODEL,SYSTEM_PROMPT, COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
+from bot.config import COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
 from bot.ai import ask_ai
 from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
-import random
-import json
-
-import requests
 
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
@@ -23,10 +20,11 @@ VERBOSE_LOG = os.environ.get("BOT_VERBOSE_LOG", "").strip().lower() in (
     "on",
 )
 
-# /clear sweeps backwards from its own message id, deleting each message it
-# still can. Telegram only lets a bot delete messages younger than 48h, so
-# CLEAR_MAX_SCAN bounds how many ids we probe, and we stop early once we've
-# seen CLEAR_STOP_AFTER_MISSES failures in a row (we've hit the 48h boundary).
+# /clear deletes recent messages by scanning backwards from its own message id
+# (message ids are sequential within a chat). Telegram only lets a bot delete
+# messages younger than 48h, so we stop early after CLEAR_STOP_AFTER_MISSES
+# consecutive failures, and CLEAR_MAX_SCAN caps how many ids a single /clear may
+# probe (so "/clear 999999" can't hammer the Telegram API).
 CLEAR_MAX_SCAN = 100
 CLEAR_STOP_AFTER_MISSES = 20
 
@@ -55,6 +53,17 @@ def _log(message, direction: str, text: str) -> None:
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"[{ts}] {sender} → {receiver}: {snippet}", flush=True)
 
+
+def _command_arg(message) -> str:
+    """Return the text after a command, or "" if there is none.
+
+    Uses split(maxsplit=1) so a trailing space ("/spec ") yields "" instead
+    of raising IndexError like the old `[1] if " " in text` idiom did.
+    """
+    parts = (message.text or "").split(maxsplit=1)
+    return parts[1].strip() if len(parts) > 1 else ""
+
+
 # start
 @bot.message_handler(commands=["start"], func=is_allowed)
 def cmd_start(message):
@@ -63,30 +72,32 @@ def cmd_start(message):
         "Hello! I'm your AI assistant. I will help you with choosing the right car for you to match your needs and budget. You can ask me anything about cars, and I'll do my best to provide you with accurate and helpful information. Let's get started!",
     )
 
+
 # help
 @bot.message_handler(commands=["help"], func=is_allowed)
 def cmd_help(message):
     lines = [
         "/start — welcome message",
-        "/help  — show this message",
+        "/help — show this message",
         "/reset — clear conversation history",
-        "/clear — clear the messages",
+        "/clear — delete recent messages (try /clear 20)",
         "/about — about this bot",
-        "/sha   — show the live git commit SHA",
-        "/joke - tell some funny joke",
-        "/quote — tell some quote",
-        "/fact — tell kind of interesting fact",
-        "/compliment — compliment the user",
-        "/roll — roll a dice",
-        "/roast — roast the name",
-        "/remember — remembers the note",
-        "/recall — shows saved notes",
-        "/forget — delete all notes",
-        "/compare — compares two or more models with each other"
+        "/sha — show the live git commit SHA",
+        "/compare — compare two or more car models",
+        "/spec — key specs of a car",
+        "/review — pros, cons & who it's for",
+        "/fact — a random car fact",
+        "/quote — an inspiring car quote",
+        "/carjoke — a car-themed joke",
+        "/story — a real-life car story",
+        "/remember — save a note",
+        "/recall — show saved notes",
+        "/forget — delete all saved notes",
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch AI provider")
     bot.send_message(message.chat.id, "\n".join(lines))
+
 
 # reset
 @bot.message_handler(commands=["reset"], func=is_allowed)
@@ -94,48 +105,54 @@ def cmd_reset(message):
     clear_history(message.from_user.id)
     bot.send_message(message.chat.id, "Conversation cleared. Starting fresh!")
 
+
 # clear — delete recent messages from the chat, then wipe the AI's memory.
 @bot.message_handler(commands=["clear"], func=is_allowed)
 def cmd_clear(message):
     chat_id = message.chat.id
-    
-    # 1. Default number of messages to scan/delete if the user just types /clear
-    scan_limit = 10 
-    
-    # 2. Check if the user provided a specific number (e.g., "/clear 5")
+
+    # Default number of messages to scan/delete when the user just types /clear.
+    scan_limit = 10
+
+    # Let the user pass a count, e.g. "/clear 5".
     command_parts = message.text.split()
     if len(command_parts) > 1:
         try:
-            # Convert the text after "/clear" into an integer number
             scan_limit = int(command_parts[1])
         except ValueError:
-            # If they typed letters instead of a number, send an error and stop
             bot.reply_to(message, "Please provide a valid number. Example: /clear 5")
             return
 
+    # Keep the count sane: no negatives, and cap it so "/clear 999999" can't
+    # hammer the Telegram API.
+    scan_limit = max(0, min(scan_limit, CLEAR_MAX_SCAN))
+
     deleted = 0
-    
     if message.chat.type == "private":
         misses = 0
-        # 3. Use the user's scan_limit instead of a fixed constant
         for mid in range(message.message_id, max(message.message_id - scan_limit, 0), -1):
             try:
                 bot.delete_message(chat_id, mid)
                 deleted += 1
                 misses = 0
             except Exception:
+                # >48h old, already deleted, or an id that never existed.
                 misses += 1
                 if misses >= CLEAR_STOP_AFTER_MISSES:
                     break
     else:
+        # In groups the bot may be an admin; a blind id sweep would wipe other
+        # people's messages, so there we only remove the /clear command itself.
         try:
             bot.delete_message(chat_id, message.message_id)
             deleted = 1
         except Exception:
             pass
-            
-    clear_history(message.from_user.id)  
+
+    clear_history(message.from_user.id)  # also forget the conversation
     bot.send_message(chat_id, f"Cleared {deleted} message(s) and reset my memory.")
+
+
 # about
 @bot.message_handler(commands=["about"], func=is_allowed)
 def cmd_about(message):
@@ -152,94 +169,169 @@ def cmd_about(message):
     ]
     if COMMIT_SHA:
         facts.append(f"Version: {COMMIT_SHA}")
+    # /about is a status probe — send the facts directly (no AI call) so it
+    # stays fast and can't be broken by a provider hiccup.
+    bot.send_message(message.chat.id, "\n".join(facts))
 
-    facts_text = "\n".join(facts)
 
-    response = requests.post(
-        f"{AI_BASE_URL}/chat/completions",
-        headers={"Authorization": f"Bearer {AI_API_KEY}"},
-        json={
-            "model": AI_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Generate a short, friendly '/about' message... \n{facts_text}"},
-            ],
-        },
-    )
+# compare <cars>
+@bot.message_handler(commands=["compare"], func=is_allowed)
+def cmd_compare(message):
+    cars = _command_arg(message)
+    if not cars:
+        bot.send_message(
+            message.chat.id,
+            "Usage: /compare <car A> vs <car B> — e.g. /compare Civic vs Corolla",
+        )
+        return
+    with keep_typing(message.chat.id):
+        reply = ask_ai(
+            message.from_user.id,
+            "Compare these car models against each other. Cover the main characteristics "
+            f"like price, horsepower, torque, engine, and fuel economy: {cars}.",
+        )
+    send_reply(message, reply)
 
-    answer = response.json()["choices"][0]["message"]["content"]
-    bot.send_message(message.chat.id, answer)
 
-# joke
-@bot.message_handler(commands=["joke"], func=is_allowed)
-def cmd_joke(message):
- reply = ask_ai(message.from_user.id, "Tell one short, clean programming joke.")
- bot.send_message(message.chat.id, reply)
+# spec <car>
+@bot.message_handler(commands=["spec"], func=is_allowed)
+def cmd_spec(message):
+    car = _command_arg(message)
+    if not car:
+        bot.send_message(
+            message.chat.id, "Usage: /spec <car> — e.g. /spec Toyota Corolla 2020"
+        )
+        return
+    with keep_typing(message.chat.id):
+        reply = ask_ai(
+            message.from_user.id,
+            f"Give the key specs of the {car}: typical price range, horsepower, engine, "
+            "transmission, drivetrain, and fuel economy. Use a short bulleted list and note "
+            "that the figures are approximate.",
+        )
+    send_reply(message, reply)
 
-# quote
-@bot.message_handler(commands=["quote"], func=is_allowed)
-def cmd_quote(message):
- reply = ask_ai(message.from_user.id, "Tell one wise quote not always about cars")
- bot.send_message(message.chat.id, reply)
+
+# review <car>
+@bot.message_handler(commands=["review"], func=is_allowed)
+def cmd_review(message):
+    car = _command_arg(message)
+    if not car:
+        bot.send_message(
+            message.chat.id, "Usage: /review <car> — e.g. /review Honda Civic"
+        )
+        return
+    with keep_typing(message.chat.id):
+        reply = ask_ai(
+            message.from_user.id,
+            f"Give a short, balanced review of the {car}: three pros, three cons, and who "
+            "it's best for.",
+        )
+    send_reply(message, reply)
+
 
 # fact
 @bot.message_handler(commands=["fact"], func=is_allowed)
 def cmd_fact(message):
- reply = ask_ai(message.from_user.id, "Tell one interesting fact about some random car ")
- bot.send_message(message.chat.id, reply)
+    with keep_typing(message.chat.id):
+        reply = ask_ai(
+            message.from_user.id,
+            "Tell one short, interesting fact about a random car or car brand.",
+        )
+    send_reply(message, reply)
 
-# compliment
-@bot.message_handler(commands=["compliment"], func=is_allowed)
-def cmd_compliment(message):
- reply = ask_ai(message.from_user.id, "Give me one genuine compliment, grounded in what you actually know about me and my preferences. If you don't have enough to be  specific, say so instead of making something up.")
- bot.send_message(message.chat.id, reply)
 
-# roll
-@bot.message_handler(commands=["roll"], func=is_allowed)
-def cmd_roll(message):
- result = random.randint(1,6)
- bot.send_message(message.chat.id, f"Rolled result: 🎲{result}!")
+# quote
+@bot.message_handler(commands=["quote"], func=is_allowed)
+def cmd_quote(message):
+    with keep_typing(message.chat.id):
+        reply = ask_ai(
+            message.from_user.id,
+            "Share one short, inspiring quote about cars, driving, or the open road.",
+        )
+    send_reply(message, reply)
 
-# roast
-@bot.message_handler(commands=["roast"], func=is_allowed)
-def cmd_roast(message):
- name = message.text.split(maxsplit=1)[1] if " " in message.text else "you"
- reply = ask_ai(message.from_user.id, f"Write a short, playful, friendly roast of {name}.")
- bot.send_message(message.chat.id, reply)
 
-# remember
+# carjoke — the on-theme replacement for the old /joke
+@bot.message_handler(commands=["carjoke"], func=is_allowed)
+def cmd_carjoke(message):
+    with keep_typing(message.chat.id):
+        reply = ask_ai(message.from_user.id, "Tell one short, clean, car-themed joke.")
+    send_reply(message, reply)
+
+
+# story
+@bot.message_handler(commands=["story"], func=is_allowed)
+def cmd_story(message):
+    with keep_typing(message.chat.id):
+        reply = ask_ai(
+            message.from_user.id,
+            "Tell a short, true-to-life story about a memorable car or a car-culture "
+            "moment. Keep it family-friendly and about 4-6 sentences.",
+        )
+    send_reply(message, reply)
+
+
+# remember <note>
 @bot.message_handler(commands=["remember"], func=is_allowed)
 def cmd_remember(message):
-      note = message.text.split(maxsplit=1)[1] if " " in message.text else ""
-      key = f"note:{message.from_user.id}"
-      old = store.get(key) # what's already saved (or None)
-      combined = f"{old}\n{note}" if old else note   # append to it
-      store.set(key, combined)
-      bot.send_message(message.chat.id, "Saved!")
+    if store is None:
+        bot.send_message(message.chat.id, "Memory isn't enabled on this bot.")
+        return
+    note = _command_arg(message)
+    if not note:
+        bot.send_message(
+            message.chat.id,
+            "Usage: /remember <note> — e.g. /remember I prefer SUVs under $30k",
+        )
+        return
+    key = f"note:{message.from_user.id}"
+    try:
+        old = store.get(key)  # what's already saved (or None)
+        combined = f"{old}\n{note}" if old else note  # append to it
+        store.set(key, combined)
+        bot.send_message(message.chat.id, "Saved!")
+    except Exception as e:
+        print(f"Store error (remember): {e}")
+        bot.send_message(message.chat.id, "Couldn't save that right now. Try again later.")
 
+
+# recall
 @bot.message_handler(commands=["recall"], func=is_allowed)
 def cmd_recall(message):
-      raw = store.get(f"note:{message.from_user.id}")
-      notes = raw.split("\n") if raw else []
-      listing = "\n".join(f"{i}. {n}" for i, n in enumerate(notes, start=1))
-      bot.send_message(message.chat.id, listing or "Nothing saved yet.")
+    if store is None:
+        bot.send_message(message.chat.id, "Memory isn't enabled on this bot.")
+        return
+    try:
+        raw = store.get(f"note:{message.from_user.id}")
+    except Exception as e:
+        print(f"Store error (recall): {e}")
+        bot.send_message(
+            message.chat.id, "Couldn't read your notes right now. Try again later."
+        )
+        return
+    notes = raw.split("\n") if raw else []
+    listing = "\n".join(f"{i}. {n}" for i, n in enumerate(notes, start=1))
+    bot.send_message(message.chat.id, listing or "Nothing saved yet.")
 
+
+# forget
 @bot.message_handler(commands=["forget"], func=is_allowed)
 def cmd_forget(message):
-      raw = store.get(f"note:{message.from_user.id}")
-      key = f"note:{message.from_user.id}"
-      raw = ""
-      store.set(key, raw)
-      bot.send_message(message.chat.id, "All notes were deleted")
+    if store is None:
+        bot.send_message(message.chat.id, "Memory isn't enabled on this bot.")
+        return
+    try:
+        store.delete(f"note:{message.from_user.id}")
+        bot.send_message(message.chat.id, "All notes were deleted.")
+    except Exception as e:
+        print(f"Store error (forget): {e}")
+        bot.send_message(
+            message.chat.id, "Couldn't clear your notes right now. Try again later."
+        )
 
 
-@bot.message_handler(commands=["compare"], func=is_allowed)
-def cmd_compare(message):
-    compare_text = message.text.split(maxsplit=1)[1] if " " in message.text else ""
-    reply = ask_ai(message.from_user.id, f"Compare this car models between each other. Write main characteristics like price, hp, torque, engine and etc: {compare_text}.")
-    bot.send_message(message.from_user.id, reply)
-
-
+# sha
 @bot.message_handler(commands=["sha"], func=is_allowed)
 def cmd_sha(message):
     sha = COMMIT_SHA or "unknown"

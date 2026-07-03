@@ -447,8 +447,19 @@ make deploy-pa  # one-command PythonAnywhere deploy (see "Fast path" in Part 2)
 | `/start` | Welcome message |
 | `/help` | List all commands |
 | `/reset` | Clear your conversation history |
+| `/clear` | Delete recent messages (optionally `/clear N`) |
 | `/about` | Show model, storage, and hosting info |
 | `/sha` | Show the live git commit SHA |
+| `/compare` | Compare two or more car models |
+| `/spec` | Key specs of a car (`/spec <car>`) |
+| `/review` | Pros, cons, and who a car is for (`/review <car>`) |
+| `/fact` | A random car fact |
+| `/quote` | An inspiring car quote |
+| `/carjoke` | A car-themed joke |
+| `/story` | A real-life car story |
+| `/remember` | Save a note (`/remember <note>`) |
+| `/recall` | Show your saved notes |
+| `/forget` | Delete all your saved notes |
 | `/model` | Switch AI provider (only available when `HF_SPACE_ID` is set) |
 
 ---

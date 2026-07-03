@@ -88,6 +88,44 @@ class _LazyBotInfo:
 BOT_INFO = _LazyBotInfo()
 
 
+def register_bot_commands() -> str:
+    """Register the slash-command menu shown in the Telegram UI.
+
+    Best-effort and idempotent — kept in sync with the handlers in
+    bot/handlers.py. Any failure is caught and returned as a status
+    string so a Telegram blip never crashes worker boot.
+    """
+    from telebot.types import BotCommand
+
+    from bot.config import HF_SPACE_ID
+
+    commands = [
+        BotCommand("start", "Welcome message"),
+        BotCommand("help", "Show all commands"),
+        BotCommand("reset", "Clear conversation history"),
+        BotCommand("clear", "Delete recent messages (try /clear 20)"),
+        BotCommand("about", "About this bot"),
+        BotCommand("sha", "Show the live git commit SHA"),
+        BotCommand("compare", "Compare two or more car models"),
+        BotCommand("spec", "Key specs of a car"),
+        BotCommand("review", "Pros, cons & who it's for"),
+        BotCommand("fact", "A random car fact"),
+        BotCommand("quote", "An inspiring car quote"),
+        BotCommand("carjoke", "A car-themed joke"),
+        BotCommand("story", "A real-life car story"),
+        BotCommand("remember", "Save a note"),
+        BotCommand("recall", "Show saved notes"),
+        BotCommand("forget", "Delete all saved notes"),
+    ]
+    if HF_SPACE_ID:
+        commands.append(BotCommand("model", "Switch AI provider"))
+    try:
+        bot.set_my_commands(commands)
+        return f"Registered {len(commands)} bot commands"
+    except Exception as e:
+        return f"set_my_commands failed: {e}"
+
+
 def register_webhook() -> str:
     """Register the Telegram webhook against WEBHOOK_URL.
 
@@ -101,6 +139,8 @@ def register_webhook() -> str:
     clear message instead of a confusing Telegram error.
     """
     from bot.config import WEBHOOK_SECRET, WEBHOOK_URL
+
+    print(register_bot_commands())
 
     if not WEBHOOK_URL:
         return "WEBHOOK_URL unset — auto-registration skipped"
