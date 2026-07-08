@@ -1,4 +1,4 @@
-from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def build_menu(items, columns=2):
