@@ -8,6 +8,7 @@ from bot.helpers import is_allowed, keep_typing, send_reply, should_respond
 from bot.history import clear_history
 from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
+from bot.components import build_menu
 
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
@@ -93,6 +94,7 @@ def cmd_help(message):
         "/remember — save a note",
         "/recall — show saved notes",
         "/forget — delete all saved notes",
+        "/car - shows car body types to pick one of them"
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch AI provider")
@@ -400,3 +402,24 @@ def handle_message(message):
         print(f"Error in handle_message: {e}")
         bot.send_message(message.chat.id, "Something went wrong. Please try again.")
         _log(message, "out", f"[error] {e}")
+
+@bot.message_handler(commands=["car"], func=is_allowed)
+def cmd_car(message):
+    keyboard = build_menu(
+        items=["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
+        columns=2
+    )
+    bot.send_message(
+        message.chat.id,
+        "Choose car type:",
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: True)
+def on_button_tap(call):
+    picked = call.data
+    bot.edit_message_text(
+        f"You picked: {picked}",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id
+    )

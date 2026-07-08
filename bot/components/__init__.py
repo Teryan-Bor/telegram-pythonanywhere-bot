@@ -1,0 +1,1 @@
+from bot.components.inline_menu import build_menu
