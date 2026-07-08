@@ -386,11 +386,13 @@ def cmd_car(message):
     keyboard = build_menu(
         items=["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
         columns=2,
+        prefix="type:",
     )
     bot.send_message(message.chat.id, "Choose car type:", reply_markup=keyboard)
 
 @bot.callback_query_handler(func=lambda call: True)
 def on_button_tap(call):
+    call.answer()
     data = call.data
 
     if data.startswith("type:"):
