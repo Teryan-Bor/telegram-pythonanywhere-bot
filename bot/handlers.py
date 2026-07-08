@@ -378,6 +378,28 @@ if HF_SPACE_ID:
             bot.send_message(message.chat.id, "Switched to Main Provider.")
 
 
+# car — show a menu of body types to pick from
+@bot.message_handler(commands=["car"], func=is_allowed)
+def cmd_car(message):
+    keyboard = build_menu(
+        items=["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
+        columns=2,
+    )
+    bot.send_message(message.chat.id, "Choose car type:", reply_markup=keyboard)
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def on_button_tap(call):
+    picked = call.data
+    bot.edit_message_text(
+        f"You picked: {picked}",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+    )
+
+
+# Catch-all: any non-command text goes to the AI. Registered LAST so the
+# command handlers above get first crack at slash-commands like /car.
 @bot.message_handler(content_types=["text"], func=is_allowed)
 def handle_message(message):
     if not should_respond(message):
@@ -402,24 +424,3 @@ def handle_message(message):
         print(f"Error in handle_message: {e}")
         bot.send_message(message.chat.id, "Something went wrong. Please try again.")
         _log(message, "out", f"[error] {e}")
-
-@bot.message_handler(commands=["car"], func=is_allowed)
-def cmd_car(message):
-    keyboard = build_menu(
-        items=["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
-        columns=2
-    )
-    bot.send_message(
-        message.chat.id,
-        "Choose car type:",
-        reply_markup=keyboard
-    )
-
-@bot.callback_query_handler(func=lambda call: True)
-def on_button_tap(call):
-    picked = call.data
-    bot.edit_message_text(
-        f"You picked: {picked}",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id
-    )
