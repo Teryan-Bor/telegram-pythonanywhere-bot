@@ -383,16 +383,17 @@ if HF_SPACE_ID:
 # car — show a menu of body types to pick from
 @bot.message_handler(commands=["car"], func=is_allowed)
 def cmd_car(message):
+    print("cmd_car called!")
     keyboard = build_menu(
         items=["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
         columns=2,
         prefix="type:",
     )
+    print(f"keyboard: {keyboard}")
     bot.send_message(message.chat.id, "Choose car type:", reply_markup=keyboard)
 
 @bot.callback_query_handler(func=lambda call: True)
 def on_button_tap(call):
-    call.answer()
     data = call.data
 
     if data.startswith("type:"):
