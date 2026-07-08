@@ -1,12 +1,10 @@
-import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def build_menu(items, columns=2):
+def build_menu(items, columns=2, prefix=""):
     buttons = [
-        InlineKeyboardButton(text, callback_data=text)
+        InlineKeyboardButton(text, callback_data=f"{prefix}{text}")
         for text in items
     ]
-
     rows = [buttons[i:i + columns] for i in range(0, len(buttons), columns)]
     return InlineKeyboardMarkup(rows)
