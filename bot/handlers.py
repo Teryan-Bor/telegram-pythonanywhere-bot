@@ -10,6 +10,8 @@ from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
 from bot.components import build_menu
 
+user_data = {}
+
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
 # line per inbound/outbound message so kids and teachers can see the
@@ -89,7 +91,7 @@ def cmd_help(message):
         "/review — pros, cons & who it's for",
         "/fact — a random car fact",
         "/quote — an inspiring car quote",
-        "/carjoke — a car-themed joke",
+        "/joke — a car-themed joke",
         "/story — a real-life car story",
         "/remember — save a note",
         "/recall — show saved notes",
@@ -255,7 +257,7 @@ def cmd_quote(message):
 
 
 # carjoke — the on-theme replacement for the old /joke
-@bot.message_handler(commands=["carjoke"], func=is_allowed)
+@bot.message_handler(commands=["joke"], func=is_allowed)
 def cmd_carjoke(message):
     with keep_typing(message.chat.id):
         reply = ask_ai(message.from_user.id, "Tell one short, clean, car-themed joke.")
@@ -387,15 +389,31 @@ def cmd_car(message):
     )
     bot.send_message(message.chat.id, "Choose car type:", reply_markup=keyboard)
 
-
 @bot.callback_query_handler(func=lambda call: True)
 def on_button_tap(call):
-    picked = call.data
-    bot.edit_message_text(
-        f"You picked: {picked}",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-    )
+    data = call.data
+
+    if data.startswith("type:"):
+        picked = data.replace("type:", "")
+        keyboard = build_menu(
+            items=["Under $20k", "$20k-$40k", "$40k-$60k", "Over $60k"],
+            columns=2,
+            prefix="budget:",
+        )
+        bot.edit_message_text(
+            f"Car type: {picked}\nNow choose budget:",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=keyboard,
+        )
+
+    elif data.startswith("budget:"):
+        picked = data.replace("budget:", "")
+        bot.edit_message_text(
+            f"Budget: {picked}\nSearching for cars...",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+        )
 
 
 # Catch-all: any non-command text goes to the AI. Registered LAST so the
