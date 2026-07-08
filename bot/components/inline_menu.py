@@ -1,3 +1,4 @@
+import telebot
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
