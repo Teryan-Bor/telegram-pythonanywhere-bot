@@ -389,6 +389,7 @@ def cmd_car(message):
         columns=2,
         prefix="type:",
     )
+
     print(f"keyboard: {keyboard}")
     bot.send_message(message.chat.id, "Choose car type:", reply_markup=keyboard)
 
@@ -412,6 +413,7 @@ def on_button_tap(call):
 
     elif data.startswith("budget:"):
         picked = data.replace("budget:", "")
+
         bot.edit_message_text(
             f"Budget: {picked}\nSearching for cars...",
             chat_id=call.message.chat.id,
