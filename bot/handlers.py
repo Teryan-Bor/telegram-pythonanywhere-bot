@@ -1,5 +1,7 @@
+import json
 import os
 from datetime import datetime
+from typing import Optional
 
 from bot.clients import bot, BOT_INFO, store
 from bot.config import COMMIT_SHA, HF_SPACE_ID, HOSTING_LABEL, MODEL, RATE_LIMIT
@@ -10,7 +12,109 @@ from bot.preferences import get_provider, set_provider
 from bot.rate_limit import is_rate_limited
 from bot.components import build_menu
 
-user_data = {}
+
+# ── Car flow: steps config (add/remove/reorder here) ─────────────
+STEPS = [
+    {
+        "key": "type",
+        "prompt": "Choose car type:",
+        "items": ["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
+        "columns": 2,
+    },
+    {
+        "key": "budget",
+        "prompt": "Now choose budget:",
+        "items": ["Under $20k", "$20k–$40k", "$40k–$60k", "Over $60k"],
+        "columns": 2,
+    },
+    {
+        "key": "year",
+        "prompt": "Preferred year range:",
+        "items": ["2020+", "2017–2019", "2014–2016", "Any"],
+        "columns": 2,
+    },
+    {
+        "key": "fuel",
+        "prompt": "Fuel type:",
+        "items": ["Gasoline", "Diesel", "Hybrid", "Electric"],
+        "columns": 2,
+    },
+]
+
+STATE_KEY = "car:{chat_id}"
+STATE_TTL = 600  # 10 min — user has to finish within this window
+
+
+# ── Car flow: state helpers (backed by SqliteStore) ───────────────
+def _get_state(chat_id: int) -> dict:
+    raw = store.get(STATE_KEY.format(chat_id=chat_id))
+    return json.loads(raw) if raw else {}
+
+
+def _save_state(chat_id: int, state: dict):
+    store.set(STATE_KEY.format(chat_id=chat_id), json.dumps(state), ex=STATE_TTL)
+
+
+def _clear_state(chat_id: int):
+    store.delete(STATE_KEY.format(chat_id=chat_id))
+
+
+# ── Car flow: engine ──────────────────────────────────────────────
+def _next_step_index(state: dict) -> int:
+    for i, step in enumerate(STEPS):
+        if step["key"] not in state:
+            return i
+    return len(STEPS)
+
+
+def _build_prompt(state: dict) -> str:
+    """Build a natural-language prompt from whatever keys were collected."""
+    parts = [f"{key}: {value}" for key, value in state.items()]
+    return "Find me a car with these preferences — " + ", ".join(parts) + "."
+
+
+def send_step(chat_id: int, user_id: int, message_id: Optional[int] = None):
+    state = _get_state(chat_id)
+    idx = _next_step_index(state)
+
+    # ── All done → call AI ──
+    if idx >= len(STEPS):
+        summary = "\n".join(f"• {k}: {v}" for k, v in state.items())
+        if message_id:
+            bot.edit_message_text(
+                f"Got it! Searching with:\n{summary}\n\n⏳ Please wait...",
+                chat_id=chat_id,
+                message_id=message_id,
+            )
+        else:
+            bot.send_message(chat_id, f"Got it! Searching with:\n{summary}\n\n⏳ Please wait...")
+
+        prompt = _build_prompt(state)
+        with keep_typing(chat_id):
+            result = ask_ai(user_id, prompt)
+        bot.send_message(chat_id, result)
+
+        _clear_state(chat_id)
+        return
+
+    # ── Show next question ──
+    step = STEPS[idx]
+    header = "\n".join(f"✅ {k}: {v}" for k, v in state.items())
+    text = f"{header}\n\n{step['prompt']}" if header else step["prompt"]
+
+    keyboard = build_menu(
+        items=step["items"],
+        columns=step["columns"],
+        prefix=f"car_{step['key']}:",
+    )
+
+    if message_id:
+        bot.edit_message_text(
+            text, chat_id=chat_id, message_id=message_id, reply_markup=keyboard
+        )
+    else:
+        bot.send_message(chat_id, text, reply_markup=keyboard)
+
 
 # Verbose console logging for local dev and teaching. Enabled by
 # BOT_VERBOSE_LOG=1 (run_local.py sets this automatically). Prints one
@@ -96,7 +200,7 @@ def cmd_help(message):
         "/remember — save a note",
         "/recall — show saved notes",
         "/forget — delete all saved notes",
-        "/car - shows car body types to pick one of them"
+        "/car — pick car preferences step by step",
     ]
     if HF_SPACE_ID:
         lines.append("/model — switch AI provider")
@@ -258,7 +362,7 @@ def cmd_quote(message):
 
 # carjoke — the on-theme replacement for the old /joke
 @bot.message_handler(commands=["joke"], func=is_allowed)
-def cmd_carjoke(message):
+def cmd_joke(message):
     with keep_typing(message.chat.id):
         reply = ask_ai(message.from_user.id, "Tell one short, clean, car-themed joke.")
     send_reply(message, reply)
@@ -380,57 +484,41 @@ if HF_SPACE_ID:
             bot.send_message(message.chat.id, "Switched to Main Provider.")
 
 
-# car — show a menu of body types to pick from
+# ── /car command ──────────────────────────────────────────────────
 @bot.message_handler(commands=["car"], func=is_allowed)
 def cmd_car(message):
-    print("cmd_car called!")
-    keyboard = build_menu(
-        items=["SUV", "Sedan", "Crossover", "Hatchback", "Sport"],
-        columns=2,
-        prefix="type:",
-    )
-
-    print(f"keyboard: {keyboard}")
-    bot.send_message(message.chat.id, "Choose car type:", reply_markup=keyboard)
-
-@bot.callback_query_handler(func=lambda call: True)
-def on_button_tap(call):
-    data = call.data
-
-    if data.startswith("type:"):
-        picked = data.replace("type:", "")
-        keyboard = build_menu(
-            items=["Under $20k", "$20k-$40k", "$40k-$60k", "Over $60k"],
-            columns=2,
-            prefix="budget:",
-        )
-        bot.edit_message_text(
-            f"Car type: {picked}\nNow choose budget:",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=keyboard,
-        )
-
-    elif data.startswith("budget:"):
-        picked = data.replace("budget:", "")
-
-        bot.edit_message_text(
-            f"Budget: {picked}\nSearching for cars...",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-        )
+    _clear_state(message.chat.id)
+    send_step(message.chat.id, message.from_user.id)
 
 
-# Catch-all: any non-command text goes to the AI. Registered LAST so the
-# command handlers above get first crack at slash-commands like /car.
+# ── Car button handler ───────────────────────────────────────────
+@bot.callback_query_handler(func=lambda call: call.data.startswith("car_"))
+def on_car_button(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    data = call.data  # e.g. "car_type:SUV"
+
+    key, value = data[4:].split(":", 1)
+
+    valid_keys = {s["key"] for s in STEPS}
+    if key not in valid_keys:
+        return
+
+    state = _get_state(chat_id)
+    state[key] = value
+    _save_state(chat_id, state)
+
+    bot.answer_callback_query(call.id)
+    send_step(chat_id, user_id, call.message.message_id)
+
+
+# ── Catch-all: non-command text → AI (registered LAST) ───────────
 @bot.message_handler(content_types=["text"], func=is_allowed)
 def handle_message(message):
     if not should_respond(message):
         return
     text = (message.text or "").replace(f"@{BOT_INFO.username}", "").strip()
     if not text:
-        # Edited messages, forwards, or stickers-with-empty-caption can
-        # arrive with no usable text. Don't burn rate-limit / AI calls on them.
         return
     _log(message, "in", text)
     if is_rate_limited(message.from_user.id):
